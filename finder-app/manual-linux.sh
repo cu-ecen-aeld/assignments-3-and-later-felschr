@@ -80,6 +80,8 @@ fi
 make ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE
 make CONFIG_PREFIX="$OUTDIR/rootfs" ARCH=$ARCH CROSS_COMPILE=$CROSS_COMPILE install
 
+cd "$OUTDIR/rootfs"
+
 echo "Library dependencies"
 ${CROSS_COMPILE}readelf -a bin/busybox | grep "program interpreter"
 ${CROSS_COMPILE}readelf -a bin/busybox | grep "Shared library"
