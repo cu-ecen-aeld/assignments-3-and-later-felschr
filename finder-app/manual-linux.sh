@@ -48,6 +48,7 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
 fi
 
 echo "Adding the Image in outdir"
+cp "$OUTDIR/linux-stable/arch/${ARCH}/boot/Image" "$OUTDIR"
 
 echo "Creating the staging directory for the root filesystem"
 cd "$OUTDIR"
@@ -106,7 +107,7 @@ make CROSS_COMPILE=$CROSS_COMPILE
 # on the target rootfs
 cp writer finder.sh finder-test.sh "$OUTDIR/rootfs/home"
 mkdir -p "$OUTDIR/rootfs/home/conf"
-cp conf/username.txt conf/assignment.txt "$OUTDIR/rootfs/confg"
+cp conf/username.txt conf/assignment.txt "$OUTDIR/rootfs/home/conf"
 cp autorun-qemu.sh "$OUTDIR/rootfs/home"
 
 # TODO: Chown the root directory
@@ -114,5 +115,6 @@ sudo chown -R root:root "$OUTDIR/rootfs"
 
 # TODO: Create initramfs.cpio.gz
 cd "$OUTDIR/rootfs"
-find . | cpio -H newc -ov --owner root:root >"$OUTDIR/rootfs/initramfs.cpio"
+find . | cpio -H newc -ov --owner root:root >"$OUTDIR/initramfs.cpio"
+cd ..
 gzip -f "$OUTDIR/initramfs.cpio"
