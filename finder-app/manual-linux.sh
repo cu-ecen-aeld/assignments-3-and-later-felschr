@@ -40,11 +40,11 @@ if [ ! -e ${OUTDIR}/linux-stable/arch/${ARCH}/boot/Image ]; then
     # create default config
     make ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE defconfig
     # build kernel
-    make ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE -j4 all
+    make ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE -j16 all
     # build kernel modules
-    make ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE modules
+    make ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE -j16 modules
     # build devicetree
-    make ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE dtbs
+    make ARCH=arm64 CROSS_COMPILE=$CROSS_COMPILE -j16 dtbs
 fi
 
 echo "Adding the Image in outdir"
