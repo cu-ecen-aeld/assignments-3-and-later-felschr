@@ -1,4 +1,5 @@
 #include "fcntl.h"
+#include "pthread.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,18 +21,106 @@ int sock_fd = -1;
 int client_fd = -1;
 int file_fd = -1;
 
+int num_threads = 0;
+pthread_mutex_t file_mutex;
+pthread_mutex_t threads_mutex;
+pthread_cond_t threads_cond;
+
+typedef struct thread_node {
+    pthread_t thread_id;
+    int client_fd;
+    struct thread_node *next;
+} thread_node_t;
+
+thread_node_t *threads = NULL;
+
+void add_thread(pthread_t thread_id, int client_fd) {
+    thread_node_t *node = (thread_node_t *)malloc(sizeof(thread_node_t));
+    node->thread_id = thread_id;
+    node->client_fd = client_fd;
+    node->next = threads;
+    threads = node;
+
+    pthread_mutex_lock(&threads_mutex);
+    num_threads++;
+    pthread_mutex_unlock(&threads_mutex);
+}
+
+void remove_thread(thread_node_t *node) {
+    if (threads == node) {
+        threads = node->next;
+    } else {
+        thread_node_t *current = threads;
+        while (current->next != node) {
+            current = current->next;
+        }
+        current->next = node->next;
+    }
+
+    free(node);
+}
+
 void signal_handler(int signum __attribute__((unused))) {
     if (signum == SIGINT || signum == SIGTERM) {
         syslog(LOG_INFO, "Caught signal, exiting.");
+        running = 0;
 
         if (sock_fd >= 0) close(sock_fd);
         if (client_fd >= 0) close(client_fd);
         if (file_fd >= 0) close(file_fd);
         unlink(FILE_PATH);
+
+        while (threads != NULL) {
+          pthread_join(threads->thread_id, NULL);
+          remove_thread(threads);
+        }
+
+        pthread_mutex_destroy(&file_mutex);
+        pthread_mutex_destroy(&threads_mutex);
+        pthread_cond_destroy(&threads_cond);
+
         closelog();
 
         exit(0);
     }
+}
+
+void *handle_connection(void *arg) {
+  char buffer[BUFFER_SIZE];
+  thread_node_t *node = (thread_node_t *)arg;
+  int client_fd = node->client_fd;
+
+  while (1) {
+    int bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
+    if (bytes_received < 0) {
+      perror("recv");
+      pthread_exit((void *)1);
+    } else if (bytes_received == 0) {
+      break;
+    }
+
+    pthread_mutex_lock(&file_mutex);
+    if (write(file_fd, buffer, bytes_received) < 0) {
+      perror("write");
+      pthread_mutex_unlock(&file_mutex);
+      pthread_exit((void *)1);
+    }
+    pthread_mutex_unlock(&file_mutex);
+
+    if (strchr(buffer, '\n') != NULL) {
+      lseek(file_fd, 0, SEEK_SET);
+      while ((bytes_received = read(file_fd, buffer, BUFFER_SIZE)) > 0) {
+        send(client_fd, buffer, bytes_received, 0);
+      }
+    }
+  }
+
+  close(client_fd);
+  client_fd = -1;
+  free(arg);
+  syslog(LOG_INFO, "Closed connection at socket %d", client_fd);
+
+  return NULL;
 }
 
 int main(int argc, char *argv[]) {
@@ -93,8 +182,6 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  char buffer[BUFFER_SIZE];
-
   file_fd = open(FILE_PATH, O_CREAT | O_RDWR | O_APPEND, 0644);
   if (file_fd < 0) {
     perror("open");
@@ -115,37 +202,32 @@ int main(int argc, char *argv[]) {
     char *client_ip = inet_ntoa(client_addr.sin_addr);
     syslog(LOG_INFO, "Accepted connection from %s", client_ip);
 
-    while (1) {
-      int bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
-      if (bytes_received < 0) {
-        perror("recv");
-        break;
-      } else if (bytes_received == 0) {
-        break;
-      }
-
-      if (write(file_fd, buffer, bytes_received) < 0) {
-        perror("write");
-        break;
-      }
-
-      if (strchr(buffer, '\n') != NULL) {
-        lseek(file_fd, 0, SEEK_SET);
-        while ((bytes_received = read(file_fd, buffer, BUFFER_SIZE)) > 0) {
-          send(client_fd, buffer, bytes_received, 0);
-        }
-      }
+    // handle connection in new thread
+    pthread_t thread_id;
+    thread_node_t *node = (thread_node_t *)malloc(sizeof(thread_node_t));
+    node->client_fd = client_fd;
+    if (pthread_create(&thread_id, NULL, handle_connection, (void *)node) < 0) {
+      perror("pthread_create");
+      close(client_fd);
+    } else {
+      add_thread(thread_id, client_fd);
     }
+  }
 
-    close(client_fd);
-    client_fd = -1;
-    syslog(LOG_INFO, "Closed connection from %s", client_ip);
+  // join all threads
+  while (threads != NULL) {
+    pthread_join(threads->thread_id, NULL);
+    remove_thread(threads);
   }
 
   close(sock_fd);
   close(file_fd);
   unlink(FILE_PATH);
   closelog();
+
+  pthread_mutex_destroy(&file_mutex);
+  pthread_mutex_destroy(&threads_mutex);
+  pthread_cond_destroy(&threads_cond);
 
   return 0;
 }
