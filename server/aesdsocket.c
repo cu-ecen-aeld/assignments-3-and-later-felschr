@@ -85,6 +85,28 @@ void signal_handler(int signum __attribute__((unused))) {
     }
 }
 
+// append timestamp to file every 10 seconds
+void *append_timestamp() {
+  while (running) {
+    time_t now = time(NULL);
+    struct tm *tm = gmtime(&now);
+    char timestamp[64];
+    strftime(timestamp, sizeof(timestamp), "timestamp:%Y-%m-%d %H:%M:%S\n", tm);
+
+    pthread_mutex_lock(&file_mutex);
+    if (write(file_fd, timestamp, strlen(timestamp)) < 0) {
+        perror("write");
+    } else {
+        syslog(LOG_INFO, "Appended timestamp: %s", timestamp);
+    }
+    pthread_mutex_unlock(&file_mutex);
+
+    usleep(10*1000*1000);
+  }
+
+  return NULL;
+}
+
 void *handle_connection(void *arg) {
   char buffer[BUFFER_SIZE];
   thread_node_t *node = (thread_node_t *)arg;
@@ -187,6 +209,17 @@ int main(int argc, char *argv[]) {
     perror("open");
     close(sock_fd);
     return 1;
+  }
+
+  // start timestamp logging thread
+  pthread_t thread_id;
+  thread_node_t *node = (thread_node_t *)malloc(sizeof(thread_node_t));
+  node->client_fd = client_fd;
+  if (pthread_create(&thread_id, NULL, append_timestamp, (void *)node) < 0) {
+    perror("pthread_create");
+    close(client_fd);
+  } else {
+    add_thread(thread_id, client_fd);
   }
 
   while (running) {
