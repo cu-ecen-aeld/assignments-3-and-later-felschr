@@ -154,6 +154,7 @@ int main(int argc, char *argv[]) {
   }
 
   openlog("aesdsocket", LOG_PID, LOG_DAEMON);
+  remove(FILE_PATH);
 
   if (signal(SIGINT, signal_handler) == SIG_ERR) {
       syslog(LOG_ERR, "Failed to set SIGINT handler");
