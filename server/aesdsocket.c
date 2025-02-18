@@ -14,7 +14,13 @@
 
 #define PORT 9000
 #define BUFFER_SIZE 1024
+
+#define USE_AESD_CHAR_DEVICE 1
+#ifdef USE_AESD_CHAR_DEVICE
+#define FILE_PATH "/dev/aesdchar"
+#else
 #define FILE_PATH "/var/tmp/aesdsocketdata"
+#endif
 
 int running = 1;
 int sock_fd = -1;
@@ -67,8 +73,10 @@ void signal_handler(int signum __attribute__((unused))) {
 
         if (sock_fd >= 0) close(sock_fd);
         if (client_fd >= 0) close(client_fd);
+#ifdef USE_AESD_CHAR_DEVICE
         if (file_fd >= 0) close(file_fd);
         unlink(FILE_PATH);
+#endif
 
         while (threads != NULL) {
           pthread_join(threads->thread_id, NULL);
@@ -85,6 +93,7 @@ void signal_handler(int signum __attribute__((unused))) {
     }
 }
 
+#ifndef USE_AESD_CHAR_DEVICE
 // append timestamp to file every 10 seconds
 void *append_timestamp() {
   while (running) {
@@ -106,11 +115,23 @@ void *append_timestamp() {
 
   return NULL;
 }
+#endif
 
 void *handle_connection(void *arg) {
   char buffer[BUFFER_SIZE];
   thread_node_t *node = (thread_node_t *)arg;
   int client_fd = node->client_fd;
+
+#ifdef USE_AESD_CHAR_DEVICE
+  file_fd = open(FILE_PATH, O_RDWR);
+#else
+  file_fd = open(FILE_PATH, O_CREAT | O_RDWR | O_APPEND, 0644);
+#endif
+  if (file_fd < 0) {
+    perror("open");
+    close(client_fd);
+    return NULL;
+  }
 
   while (1) {
     int bytes_received = recv(client_fd, buffer, BUFFER_SIZE, 0);
@@ -137,7 +158,9 @@ void *handle_connection(void *arg) {
     }
   }
 
+  close(file_fd);
   close(client_fd);
+  file_fd = -1;
   client_fd = -1;
   free(arg);
   syslog(LOG_INFO, "Closed connection at socket %d", client_fd);
@@ -205,13 +228,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  file_fd = open(FILE_PATH, O_CREAT | O_RDWR | O_APPEND, 0644);
-  if (file_fd < 0) {
-    perror("open");
-    close(sock_fd);
-    return 1;
-  }
-
+#ifndef USE_AESD_CHAR_DEVICE
   // start timestamp logging thread
   pthread_t thread_id;
   thread_node_t *node = (thread_node_t *)malloc(sizeof(thread_node_t));
@@ -222,6 +239,7 @@ int main(int argc, char *argv[]) {
   } else {
     add_thread(thread_id, client_fd);
   }
+#endif
 
   while (running) {
     struct sockaddr_in client_addr;
@@ -255,8 +273,9 @@ int main(int argc, char *argv[]) {
   }
 
   close(sock_fd);
-  close(file_fd);
+#ifndef USE_AESD_CHAR_DEVICE
   unlink(FILE_PATH);
+#endif
   closelog();
 
   pthread_mutex_destroy(&file_mutex);
