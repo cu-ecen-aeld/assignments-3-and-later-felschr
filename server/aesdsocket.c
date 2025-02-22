@@ -240,7 +240,11 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+#ifdef USE_AESD_CHAR_DEVICE
+  file_fd = open(FILE_PATH, O_RDWR);
+#else
   file_fd = open(FILE_PATH, O_CREAT | O_RDWR | O_APPEND, 0644);
+#endif
   if (file_fd < 0) {
     perror("open");
     close(sock_fd);
