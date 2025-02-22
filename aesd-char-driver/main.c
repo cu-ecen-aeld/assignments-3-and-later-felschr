@@ -19,6 +19,7 @@
 #include <linux/fs.h> // file_operations
 #include "aesd-circular-buffer.h"
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -30,6 +31,7 @@ int aesd_release(struct inode *inode, struct file *filp);
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
 loff_t aesd_llseek(struct file *filp, loff_t offset, int whence);
+long int aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 int aesd_init_module(void);
 void aesd_cleanup_module(void);
 
@@ -198,6 +200,38 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
     return ret;
 }
 
+long int aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    struct aesd_dev *const dev = filp->private_data;
+    struct aesd_seekto seek;
+    struct aesd_buffer_entry *entry = NULL;
+    size_t entry_offset = 0;
+
+    if (cmd != AESDCHAR_IOCSEEKTO) {
+        return -ENOTTY;
+    }
+
+    if (copy_from_user(&seek, sizeof(seek), (void __user *)arg)) {
+        return -EFAULT;
+    }
+
+    if (mutex_lock_interruptible(&dev->lock)) {
+        return -ERESTARTSYS;
+    }
+
+    entry = aesd_circular_buffer_find_entry_offset_for_fpos(&dev->buffer, seek.write_cmd, &entry_offset);
+    if (!entry || seek.write_cmd_offset >= entry->size) {
+        mutex_unlock(&dev->lock);
+        return -EINVAL;
+    }
+
+    filp->f_pos = entry_offset + seek.write_cmd_offset;
+
+    mutex_unlock(&dev->lock);
+
+    return 0;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
@@ -205,6 +239,7 @@ struct file_operations aesd_fops = {
     .open =     aesd_open,
     .release =  aesd_release,
     .llseek =   aesd_llseek,
+    .unlocked_ioctl = aesd_unlocked_ioctl,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
