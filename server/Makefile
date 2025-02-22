@@ -1,23 +1,20 @@
 CC ?= $(CROSS_COMPILE)gcc
-CFLAGS ?= -Wall -Wextra
+USE_AESD_CHAR_DEVICE ?= 1
+CFLAGS ?= -g -Wall -Werror
 LDFLAGS ?= -lpthread -lrt
-USE_AESD_CHAR_DEVICE ?= y
+TARGET_AESDSOCKET := aesdsocket
+OBJS := $(TARGET_AESDSOCKET).o
+.PHONY: default all
 
-ifeq ($(USE_AESD_CHAR_DEVICE),y)
-	EXTRA_CFLAGS += -DUSE_AESD_CHAR_DEVICE
-endif
+all: default
 
-default: all
+default: $(TARGET_AESDSOCKET)
 
-all: aesdsocket
+$(TARGET_AESDSOCKET): $(OBJS)
+	$(CC) $(FLAGS) $^ -o $@ $(INCLUDES) $(LDFLAGS)
 
-aesdsocket: aesdsocket.o
-	$(CC) $(CFLAGS) $(EXTRA_CFLAGS) $(INCLUDES) aesdsocket.o -o aesdsocket $(LDFLAGS)
-
-%.o: %.c
-	$(CC) $(CFLAGS) -c $<
+$(TARGET_AESDSOCKET).o: $(TARGET_AESDSOCKET).c
+	$(CC) $(CFLAGS) -DUSE_AESD_CHAR_DEVICE=$(USE_AESD_CHAR_DEVICE) -c $(TARGET_AESDSOCKET).c
 
 clean:
-	rm -f aesdsocket *.o *.elf *.map
-
-.PHONY: clean
+	rm -f $(TARGET_AESDSOCKET) *.o
