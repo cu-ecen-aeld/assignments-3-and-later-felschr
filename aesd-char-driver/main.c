@@ -29,6 +29,7 @@ int aesd_open(struct inode *inode, struct file *filp);
 int aesd_release(struct inode *inode, struct file *filp);
 ssize_t aesd_read(struct file *filp, char __user *buf, size_t count, loff_t *f_pos);
 ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count, loff_t *f_pos);
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence);
 int aesd_init_module(void);
 void aesd_cleanup_module(void);
 
@@ -155,12 +156,55 @@ ssize_t aesd_write(struct file *filp, const char __user *buf, size_t count,
     mutex_unlock(&dev->lock);
     return count;
 }
+
+loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
+{
+    loff_t ret;
+    struct aesd_dev *dev = filp->private_data;
+    size_t total_length = 0;
+    int i;
+
+    if (mutex_lock_interruptible(&dev->lock)) {
+        return -ERESTARTSYS;
+    }
+
+    switch (whence) {
+        case SEEK_SET:
+            ret = offset;
+            break;
+        case SEEK_CUR:
+            ret = filp->f_pos + offset;
+            break;
+        case SEEK_END:
+            for (i = dev->buffer.out_offs; i != dev->buffer.in_offs; i = (i + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED) {
+                total_length += dev->buffer.entry[i].size;
+            }
+            ret = total_length + offset;
+            break;
+        default:
+            mutex_unlock(&dev->lock);
+            return -EINVAL;
+    }
+
+    if (ret < 0 || ret > total_length) {
+        mutex_unlock(&dev->lock);
+        return -EINVAL;
+    }
+
+    filp->f_pos = ret;
+
+    mutex_unlock(&dev->lock);
+
+    return ret;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
     .write =    aesd_write,
     .open =     aesd_open,
     .release =  aesd_release,
+    .llseek =   aesd_llseek,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
