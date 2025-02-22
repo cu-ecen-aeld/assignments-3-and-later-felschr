@@ -70,12 +70,14 @@ ssize_t aesd_read(struct file *filp, char __user *buf, size_t count,
         return retval;
     }
 
-    size_t bytes_to_read = entry->size - entry_offset;
-    if (bytes_to_read > count) {
+    size_t bytes_to_read;
+    if (count > entry->size) {
+        bytes_to_read = entry->size;
+    } else {
         bytes_to_read = count;
     }
 
-    if (copy_to_user(buf, entry->buffptr + entry_offset, bytes_to_read)) {
+    if (copy_to_user(buf, entry->buffptr, bytes_to_read)) {
         mutex_unlock(&dev->lock);
         return -EFAULT;
     }
@@ -292,7 +294,7 @@ int aesd_init_module(void)
 
     result = aesd_setup_cdev(&aesd_device);
 
-    if( result ) {
+    if (result) {
         unregister_chrdev_region(dev, 1);
     }
     return result;
@@ -317,13 +319,9 @@ void aesd_cleanup_module(void)
     {
         temp_count++;
 
-        if(buffer->entry[i].buffptr != NULL)
+        if (buffer->entry[i].buffptr != NULL)
         {
-            #ifdef __KERNEL__
             kfree(buffer->entry[i].buffptr);
-            #else
-            free((void*)buffer->entry[i].buffptr);
-            #endif
         }
     }
 
