@@ -28,9 +28,9 @@ int client_fd = -1;
 int file_fd = -1;
 
 int num_threads = 0;
-pthread_mutex_t file_mutex;
-pthread_mutex_t threads_mutex;
-pthread_cond_t threads_cond;
+pthread_mutex_t file_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_mutex_t threads_mutex = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t threads_cond = PTHREAD_COND_INITIALIZER;
 
 typedef struct thread_node {
     pthread_t thread_id;
@@ -70,26 +70,6 @@ void signal_handler(int signum __attribute__((unused))) {
     if (signum == SIGINT || signum == SIGTERM) {
         syslog(LOG_INFO, "Caught signal, exiting.");
         running = 0;
-
-        if (sock_fd >= 0) close(sock_fd);
-        if (client_fd >= 0) close(client_fd);
-#ifdef USE_AESD_CHAR_DEVICE
-        if (file_fd >= 0) close(file_fd);
-        unlink(FILE_PATH);
-#endif
-
-        while (threads != NULL) {
-          pthread_join(threads->thread_id, NULL);
-          remove_thread(threads);
-        }
-
-        pthread_mutex_destroy(&file_mutex);
-        pthread_mutex_destroy(&threads_mutex);
-        pthread_cond_destroy(&threads_cond);
-
-        closelog();
-
-        exit(0);
     }
 }
 
@@ -188,6 +168,19 @@ int main(int argc, char *argv[]) {
       return 1;
   }
 
+  if (pthread_mutex_init(&file_mutex, NULL)!= 0) {
+      perror("pthread_mutex_init");
+      return 1;
+  }
+  if (pthread_mutex_init(&threads_mutex, NULL)!= 0) {
+      perror("pthread_mutex_init");
+      return 1;
+  }
+  if (pthread_cond_init(&threads_cond, NULL)!= 0) {
+      perror("pthread_cond_init");
+      return 1;
+  }
+
   sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 
   struct sockaddr_in serv_addr;
@@ -236,6 +229,7 @@ int main(int argc, char *argv[]) {
   if (pthread_create(&thread_id, NULL, append_timestamp, (void *)node) < 0) {
     perror("pthread_create");
     close(client_fd);
+    free(node);
   } else {
     add_thread(thread_id, client_fd);
   }
@@ -261,6 +255,7 @@ int main(int argc, char *argv[]) {
     if (pthread_create(&thread_id, NULL, handle_connection, (void *)node) < 0) {
       perror("pthread_create");
       close(client_fd);
+      free(node);
     } else {
       add_thread(thread_id, client_fd);
     }
