@@ -18,6 +18,7 @@
 #include <linux/cdev.h>
 #include <linux/fs.h> // file_operations
 #include "aesdchar.h"
+#include "aesd_ioctl.h"
 int aesd_major =   0; // use dynamic major
 int aesd_minor =   0;
 
@@ -191,6 +192,60 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
     return new_pos;
 }
 
+long int aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
+{
+    struct aesd_dev *const dev = filp->private_data;
+    struct aesd_seekto seek;
+    struct aesd_buffer_entry *entry = NULL;
+    size_t entry_offset = 0;
+
+    if (cmd != AESDCHAR_IOCSEEKTO) {
+        return -ENOTTY;
+    }
+
+    if (copy_from_user(&seek, sizeof(seek), (void __user *)arg)) {
+        return -EFAULT;
+    }
+
+    if (mutex_lock_interruptible(&dev->lock)) {
+        return -ERESTARTSYS;
+    }
+
+    dev->buffer.out_offs = dev->buffer.in_offs;
+    dev->buffer.full = 0;
+
+    size_t current_output_index = dev->buffer.out_offs;
+    size_t target_entry_index = seek.write_cmd + current_output_index;
+
+    entry = &dev->buffer.entry[target_entry_index];
+
+    size_t offset_within_command = 0;
+
+    loff_t new_pos = (loff_t)offset_within_command;
+
+    size_t total_size = 0;
+
+    char *data = (char *)arg;
+    size_t data_len = strlen(data);
+    if (data_len > dev->buffer.entry[target_entry_index].size) {
+        mutex_unlock(&dev->lock);
+        return -EINVAL;
+    }
+
+    if (copy_from_user(entry->buffptr, data_len, data)) {
+        mutex_unlock(&dev->lock);
+        return -EFAULT;
+    }
+
+    entry->size = data_len;
+
+    dev->buffer.out_offs = (dev->buffer.out_offs + 1) % AESDCHAR_MAX_WRITE_OPERATIONS_SUPPORTED;
+
+    mutex_unlock(&dev->lock);
+
+    return 0;
+}
+
 struct file_operations aesd_fops = {
     .owner =    THIS_MODULE,
     .read =     aesd_read,
@@ -198,6 +253,7 @@ struct file_operations aesd_fops = {
     .open =     aesd_open,
     .release =  aesd_release,
     .llseek =   aesd_llseek,
+    .unlocked_ioctl = aesd_unlocked_ioctl,
 };
 
 static int aesd_setup_cdev(struct aesd_dev *dev)
