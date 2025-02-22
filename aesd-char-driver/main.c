@@ -202,16 +202,16 @@ loff_t aesd_llseek(struct file *filp, loff_t offset, int whence)
 
 long int aesd_unlocked_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
-    struct aesd_dev *const dev = filp->private_data;
+    struct aesd_dev *dev = filp->private_data;
     struct aesd_seekto seek;
-    struct aesd_buffer_entry *entry = NULL;
+    struct aesd_buffer_entry *entry;
     size_t entry_offset = 0;
 
     if (cmd != AESDCHAR_IOCSEEKTO) {
         return -ENOTTY;
     }
 
-    if (copy_from_user(&seek, sizeof(seek), (void __user *)arg)) {
+    if (copy_from_user(&seek, (void __user *)arg, sizeof(seek)) != 0) {
         return -EFAULT;
     }
 

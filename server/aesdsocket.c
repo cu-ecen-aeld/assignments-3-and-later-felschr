@@ -8,9 +8,11 @@
 #include <syslog.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <netinet/in.h>
+#include "../aesd-char-driver/aesd_ioctl.h"
 
 #define PORT 9000
 #define BUFFER_SIZE 1024
@@ -122,13 +124,37 @@ void *handle_connection(void *arg) {
       break;
     }
 
-    pthread_mutex_lock(&file_mutex);
-    if (write(file_fd, buffer, bytes_received) < 0) {
-      perror("write");
-      pthread_mutex_unlock(&file_mutex);
-      pthread_exit((void *)1);
+    buffer[bytes_received] = '\0';
+
+    if (strncmp(buffer, "AESDCHAR_IOCSEEKTO:", 19) == 0) {
+        char *pos = strchr(buffer, ':');
+        if (pos != NULL) {
+            pos++; // skip colon
+
+            char *endptr;
+            uint32_t write_cmd = strtoul(pos, &endptr, 10);
+            if (*endptr == ',') {
+                pos = endptr + 1; // skip comma
+                uint32_t offset = strtoul(pos, &endptr, 10);
+
+                struct aesd_seekto seek_to = {write_cmd, offset};
+                int ioctl_result = ioctl(file_fd, AESDCHAR_IOCSEEKTO, &seek_to);
+                if (ioctl_result < 0) {
+                    perror("ioctl");
+                }
+            } else {
+                syslog(LOG_ERR, "Invalid format for AESDCHAR_IOCSEEKTO");
+            }
+        }
+    } else {
+        pthread_mutex_lock(&file_mutex);
+        if (write(file_fd, buffer, bytes_received) < 0) {
+            perror("write");
+            pthread_mutex_unlock(&file_mutex);
+            pthread_exit((void *)1);
+        }
+        pthread_mutex_unlock(&file_mutex);
     }
-    pthread_mutex_unlock(&file_mutex);
 
     if (strchr(buffer, '\n') != NULL) {
       lseek(file_fd, 0, SEEK_SET);
